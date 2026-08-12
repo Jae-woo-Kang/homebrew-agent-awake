@@ -26,3 +26,17 @@ jobs:
         with:
           name: AgentAwake-CI
           path: dist/AgentAwake-0.1.0.zip
+
+  homebrew-install:
+    if: github.event_name == 'push'
+    needs: test-and-build
+    runs-on: macos-14
+    steps:
+      - name: Add AgentAwake tap
+        run: brew tap Jae-woo-Kang/agent-awake
+      - name: Install release through Homebrew
+        run: brew install --cask agent-awake
+      - name: Verify application bundle
+        run: test -d /Applications/AgentAwake.app
+      - name: Uninstall release
+        run: brew uninstall --cask agent-awake
