@@ -4,7 +4,7 @@ import Foundation
 import IOKit.pwr_mgt
 
 @MainActor
-final class KeepAwakeController: ObservableObject {
+final class KeepAwakeController: NSObject, ObservableObject {
     @Published private(set) var isEnabled = false
     @Published private(set) var isTransitioning = false
     @Published private(set) var statusMessage = "꺼짐"
@@ -19,24 +19,18 @@ final class KeepAwakeController: ObservableObject {
     private var heartbeatTimer: Timer?
     private var leaseDirectory: URL?
     private var expectedGuardianStop = false
-    private var terminationObserver: NSObjectProtocol?
-
-    init() {
-        terminationObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.willTerminateNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in
-                self?.shutdown()
-            }
-        }
+    override init() {
+        super.init()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillTerminate),
+            name: NSApplication.willTerminateNotification,
+            object: nil
+        )
     }
 
     deinit {
-        if let terminationObserver {
-            NotificationCenter.default.removeObserver(terminationObserver)
-        }
+        NotificationCenter.default.removeObserver(self)
         heartbeatTimer?.invalidate()
     }
 
@@ -44,7 +38,7 @@ final class KeepAwakeController: ObservableObject {
         if enabled {
             enable()
         } else {
-            disable(reason: "사용자가 잠자기 방지를 껐습니다.")
+            disable()
         }
     }
 
@@ -75,12 +69,10 @@ final class KeepAwakeController: ObservableObject {
         }
     }
 
-    func disable(reason: String) {
+    func disable() {
         guard isEnabled || isTransitioning else { return }
 
         expectedGuardianStop = true
-        heartbeatTimer?.invalidate()
-        heartbeatTimer = nil
         writeStopSignal()
         releasePowerAssertion()
         isEnabled = false
@@ -93,7 +85,7 @@ final class KeepAwakeController: ObservableObject {
     }
 
     func shutdown() {
-        disable(reason: "AgentAwake가 종료됩니다.")
+        disable()
     }
 
     private func createPowerAssertion() throws {
@@ -162,25 +154,6 @@ final class KeepAwakeController: ObservableObject {
         process.arguments = ["-e", appleScript]
         process.standardOutput = Pipe()
         process.standardError = errorPipe
-        process.terminationHandler = { [weak self, weak process, weak errorPipe] _ in
-            let message: String?
-            if let errorPipe {
-                let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
-                let value = String(data: data, encoding: .utf8)?
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                message = value?.isEmpty == false ? value : nil
-            } else {
-                message = nil
-            }
-
-            DispatchQueue.main.async {
-                guard let self else { return }
-                let failedUnexpectedly = !self.expectedGuardianStop
-                    && (process?.terminationStatus ?? 1) != 0
-                self.finishGuardianStop(errorMessage: failedUnexpectedly ? message : nil)
-            }
-        }
-
         guardianProcess = process
         guardianErrorPipe = errorPipe
         do {
@@ -195,14 +168,26 @@ final class KeepAwakeController: ObservableObject {
     private func startHeartbeat() {
         writeHeartbeat()
         heartbeatTimer?.invalidate()
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.heartbeatTick()
-            }
-        }
+        heartbeatTimer = Timer.scheduledTimer(
+            timeInterval: 1.0,
+            target: self,
+            selector: #selector(heartbeatTimerFired),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     private func heartbeatTick() {
+        if let guardianProcess, !guardianProcess.isRunning {
+            let data = guardianErrorPipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+            let rawMessage = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let message = rawMessage?.isEmpty == false ? rawMessage : nil
+            let failedUnexpectedly = !expectedGuardianStop && guardianProcess.terminationStatus != 0
+            finishGuardianStop(errorMessage: failedUnexpectedly ? message : nil)
+            return
+        }
+
         guard isEnabled else { return }
         writeHeartbeat()
 
@@ -213,6 +198,14 @@ final class KeepAwakeController: ObservableObject {
         if state.contains("state=active") {
             statusMessage = "켜짐 · 덮개 닫힘 허용"
         }
+    }
+
+    @objc private func heartbeatTimerFired() {
+        heartbeatTick()
+    }
+
+    @objc private func applicationWillTerminate() {
+        shutdown()
     }
 
     private func writeHeartbeat() {

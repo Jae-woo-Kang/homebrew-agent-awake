@@ -15,13 +15,19 @@ final class AppModel: ObservableObject {
 
     private var cancellables: Set<AnyCancellable> = []
 
-    init(
-        statusMonitor: AgentStatusMonitor = AgentStatusMonitor(),
-        keepAwakeController: KeepAwakeController = KeepAwakeController()
-    ) {
+    init() {
+        self.statusMonitor = AgentStatusMonitor()
+        self.keepAwakeController = KeepAwakeController()
+        bind()
+    }
+
+    init(statusMonitor: AgentStatusMonitor, keepAwakeController: KeepAwakeController) {
         self.statusMonitor = statusMonitor
         self.keepAwakeController = keepAwakeController
+        bind()
+    }
 
+    private func bind() {
         statusMonitor.$snapshot
             .sink { [weak self] in self?.snapshot = $0 }
             .store(in: &cancellables)

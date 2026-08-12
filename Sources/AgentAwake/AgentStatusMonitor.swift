@@ -3,20 +3,23 @@ import AppKit
 import Foundation
 
 @MainActor
-final class AgentStatusMonitor: ObservableObject {
+final class AgentStatusMonitor: NSObject, ObservableObject {
     @Published private(set) var snapshot = AgentSnapshot()
     @Published private(set) var lastError: String?
 
     private var timer: Timer?
     private var isRefreshing = false
 
-    init() {
+    override init() {
+        super.init()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.refresh()
-            }
-        }
+        timer = Timer.scheduledTimer(
+            timeInterval: 2.0,
+            target: self,
+            selector: #selector(refreshTimerFired),
+            userInfo: nil,
+            repeats: true
+        )
     }
 
     deinit {
@@ -35,27 +38,25 @@ final class AgentStatusMonitor: ObservableObject {
             )
         }
 
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let result = Self.readProcesses()
-            let capturedAt = Date()
+        let result = Self.readProcesses()
+        let capturedAt = Date()
+        isRefreshing = false
 
-            DispatchQueue.main.async {
-                guard let self else { return }
-                self.isRefreshing = false
-
-                switch result {
-                case .success(let processes):
-                    self.snapshot = AgentProcessClassifier.classify(
-                        processes: processes,
-                        runningApplications: apps,
-                        capturedAt: capturedAt
-                    )
-                    self.lastError = nil
-                case .failure(let error):
-                    self.lastError = error.localizedDescription
-                }
-            }
+        switch result {
+        case .success(let processes):
+            snapshot = AgentProcessClassifier.classify(
+                processes: processes,
+                runningApplications: apps,
+                capturedAt: capturedAt
+            )
+            lastError = nil
+        case .failure(let error):
+            lastError = error.localizedDescription
         }
+    }
+
+    @objc private func refreshTimerFired() {
+        refresh()
     }
 
     private static func readProcesses() -> Result<[ProcessRecord], Error> {
