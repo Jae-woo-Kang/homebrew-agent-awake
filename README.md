@@ -21,9 +21,15 @@ AgentAwake는 Codex와 Claude Code의 실행 위치를 보여주고, 필요할 �
 ## Homebrew로 설치
 
 ```bash
-brew install --cask Jae-woo-Kang/agent-awake/agent-awake
+brew tap Jae-woo-Kang/agent-awake
+brew trust Jae-woo-Kang/agent-awake
+brew install --cask agent-awake
 open -a AgentAwake
 ```
+
+Homebrew의 `trust` 단계는 서드파티 tap에서 macOS 앱을 설치한다는 사실을
+사용자가 명시적으로 승인하는 절차입니다. 저장소 주소와 소유자가
+`Jae-woo-Kang/homebrew-agent-awake`인지 확인한 뒤 실행하세요.
 
 업데이트:
 

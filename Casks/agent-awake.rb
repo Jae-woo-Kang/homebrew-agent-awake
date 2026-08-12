@@ -7,7 +7,7 @@ cask "agent-awake" do
   desc "Menu bar monitor for Codex and Claude with a safe Mac keep-awake toggle"
   homepage "https://github.com/Jae-woo-Kang/homebrew-agent-awake"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "AgentAwake.app"
 
