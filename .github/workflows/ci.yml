@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Swift tests
+        run: swift test
+      - name: Check guardian script
+        run: bash -n Sources/AgentAwake/Resources/agentawake-guardian.sh
+      - name: Check Homebrew Cask syntax
+        run: ruby -c Casks/agent-awake.rb
+      - name: Build universal app bundle
+        run: VERSION=0.1.0 scripts/build-app.sh
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: AgentAwake-CI
+          path: dist/AgentAwake-0.1.0.zip
