@@ -10,17 +10,13 @@ struct AgentAwakeApp: App {
         MenuBarExtra {
             AgentAwakeMenu(model: model)
         } label: {
-            Image(systemName: menuBarSymbol)
+            // Keep the status item identity stable while the menu is open.
+            // Replacing this label during an administrator prompt can make the
+            // item disappear on recent macOS versions.
+            Image(systemName: "bolt.shield")
                 .accessibilityLabel(menuBarAccessibilityLabel)
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var menuBarSymbol: String {
-        if model.keepAwakeEnabled || model.keepAwakeTransitioning {
-            return "bolt.shield.fill"
-        }
-        return model.snapshot.hasRunningAgent ? "terminal.fill" : "moon.zzz"
     }
 
     private var menuBarAccessibilityLabel: String {

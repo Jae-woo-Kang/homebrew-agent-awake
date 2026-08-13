@@ -17,13 +17,15 @@ FINISHED=0
 FORCE_SLEEP=0
 EXIT_REASON="guardian stopped"
 INPUTS_VALIDATED=0
+ACTIVATED=0
 
 write_state() {
     local state="$1"
     local reason="$2"
 
     if [ "$INPUTS_VALIDATED" -eq 1 ] && [ ! -L "$STATE_FILE" ] && [ -f "$STATE_FILE" ]; then
-        printf 'state=%s\nreason=%s\n' "$state" "$reason" > "$STATE_FILE"
+        printf 'state=%s\nreason=%s\nactivated=%s\n' \
+            "$state" "$reason" "$ACTIVATED" > "$STATE_FILE"
     fi
 }
 
@@ -125,6 +127,7 @@ trap 'finish' EXIT
 validate_inputs
 ORIGINAL_SLEEP_DISABLED="$(read_sleep_disabled)"
 pmset -a disablesleep 1
+ACTIVATED=1
 write_state "active" "keep-awake active"
 
 while :; do
