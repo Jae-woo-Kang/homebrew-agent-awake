@@ -2,6 +2,7 @@
 
 test:
 	swift test
+	bash -n Sources/AgentAwake/Resources/agentawake-guardian.sh
 	ruby -c Casks/agent-awake.rb
 
 build:

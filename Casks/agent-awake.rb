@@ -19,9 +19,11 @@ cask "agent-awake" do
   ]
 
   caveats <<~EOS
-    AgentAwake prevents automatic idle system sleep while its toggle is on.
-    Closing the MacBook lid or explicitly choosing Sleep still puts the Mac
-    to sleep.
+    AgentAwake asks for administrator approval when enabling its keep-awake
+    toggle so it can keep the Mac running with the lid closed. If a previous
+    session was interrupted, restore normal sleep with:
+
+      sudo pmset -a disablesleep 0
 
     This beta build may be ad-hoc signed. If macOS blocks the first launch,
     open System Settings > Privacy & Security and choose Open Anyway.
