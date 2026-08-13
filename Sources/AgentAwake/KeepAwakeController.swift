@@ -19,6 +19,8 @@ final class KeepAwakeController: NSObject, ObservableObject {
     private var heartbeatTimer: Timer?
     private var leaseDirectory: URL?
     private var expectedGuardianStop = false
+    private var guardianDidActivate = false
+
     override init() {
         super.init()
         NotificationCenter.default.addObserver(
@@ -47,25 +49,34 @@ final class KeepAwakeController: NSObject, ObservableObject {
 
         lastError = nil
         isTransitioning = true
-        statusMessage = "관리자 승인을 기다리는 중…"
+        statusMessage = "잠자기 방지를 켜는 중…"
 
         do {
             try createPowerAssertion()
-            let lease = try createLeaseDirectory()
-            leaseDirectory = lease
-            expectedGuardianStop = false
-            try launchGuardian(leaseDirectory: lease)
-            startHeartbeat()
-            isEnabled = true
-            statusMessage = "켜짐 · 덮개 닫힘 허용"
-            isTransitioning = false
         } catch {
-            releasePowerAssertion()
-            cleanLeaseDirectory()
             isEnabled = false
             isTransitioning = false
             statusMessage = "켜지지 않음"
             lastError = error.localizedDescription
+            return
+        }
+
+        // The user-level assertion is the primary feature. Keep it active even
+        // if the optional administrator-approved closed-lid guardian cannot
+        // start or the user dismisses its authentication prompt.
+        isEnabled = true
+        statusMessage = "켜짐 · 기본 잠자기 방지"
+
+        do {
+            let lease = try createLeaseDirectory()
+            leaseDirectory = lease
+            expectedGuardianStop = false
+            guardianDidActivate = false
+            try launchGuardian(leaseDirectory: lease)
+            startHeartbeat()
+            statusMessage = "켜짐 · 덮개 닫힘 승인 대기…"
+        } catch {
+            finishGuardianSetupFailure(error.localizedDescription)
         }
     }
 
@@ -196,6 +207,8 @@ final class KeepAwakeController: NSObject, ObservableObject {
         guard let state = try? String(contentsOf: stateURL, encoding: .utf8) else { return }
 
         if state.contains("state=active") {
+            guardianDidActivate = true
+            isTransitioning = false
             statusMessage = "켜짐 · 덮개 닫힘 허용"
         }
     }
@@ -222,27 +235,66 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     private func finishGuardianStop(errorMessage: String?) {
+        let guardianWasActive = guardianDidActivate || guardianStateShowsActivation()
+        let exitReason = guardianExitReason()
+
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
-        releasePowerAssertion()
         guardianProcess = nil
         guardianErrorPipe = nil
 
-        if !expectedGuardianStop {
+        if expectedGuardianStop {
+            releasePowerAssertion()
+            isEnabled = false
+            statusMessage = "꺼짐"
+        } else if guardianWasActive {
+            // A guardian that reached the active state only exits for a safety
+            // condition, so stop both the elevated and user-level protections.
+            releasePowerAssertion()
             isEnabled = false
             if let errorMessage {
                 lastError = Self.friendlyGuardianError(errorMessage)
                 statusMessage = "안전장치가 잠자기 방지를 해제함"
             } else {
-                statusMessage = guardianExitReason() ?? "안전장치가 잠자기 방지를 해제함"
+                statusMessage = exitReason ?? "안전장치가 잠자기 방지를 해제함"
             }
         } else {
-            statusMessage = "꺼짐"
+            // Authentication cancellation or guardian setup failure must not
+            // turn off the already-active basic sleep assertion.
+            isEnabled = assertionID != 0
+            statusMessage = "켜짐 · 기본 잠자기 방지"
+            lastError = Self.basicModeFallbackMessage(errorMessage)
         }
 
         isTransitioning = false
         expectedGuardianStop = false
+        guardianDidActivate = false
         cleanLeaseDirectory()
+    }
+
+    private func finishGuardianSetupFailure(_ message: String) {
+        heartbeatTimer?.invalidate()
+        heartbeatTimer = nil
+        guardianProcess = nil
+        guardianErrorPipe = nil
+        expectedGuardianStop = false
+        guardianDidActivate = false
+        isEnabled = assertionID != 0
+        isTransitioning = false
+        statusMessage = isEnabled ? "켜짐 · 기본 잠자기 방지" : "켜지지 않음"
+        lastError = isEnabled
+            ? Self.basicModeFallbackMessage(message)
+            : message
+        cleanLeaseDirectory()
+    }
+
+    private func guardianStateShowsActivation() -> Bool {
+        guard let leaseDirectory else { return false }
+        let stateURL = leaseDirectory.appendingPathComponent("state")
+        guard let state = try? String(contentsOf: stateURL, encoding: .utf8) else {
+            return false
+        }
+        return state.contains("activated=1")
     }
 
     private func guardianExitReason() -> String? {
@@ -279,6 +331,15 @@ final class KeepAwakeController: NSObject, ObservableObject {
             return "관리자 승인이 취소되어 덮개 닫힘 모드를 켜지 못했습니다."
         }
         return message
+    }
+
+    private static func basicModeFallbackMessage(_ message: String?) -> String {
+        if let message,
+           message.localizedCaseInsensitiveContains("User canceled")
+            || message.localizedCaseInsensitiveContains("-128") {
+            return "관리자 승인이 취소되었습니다. 기본 잠자기 방지는 계속 켜져 있습니다."
+        }
+        return "덮개 닫힘 모드는 켜지지 않았지만 기본 잠자기 방지는 계속 켜져 있습니다."
     }
 }
 
