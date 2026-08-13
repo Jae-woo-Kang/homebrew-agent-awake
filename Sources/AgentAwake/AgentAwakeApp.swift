@@ -37,7 +37,7 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
         self.statusItem = statusItem
 
         let rootView = AgentAwakeMenu(model: model)
-            .frame(width: 370, minHeight: 500, alignment: .topLeading)
+            .frame(width: 370, height: 500, alignment: .topLeading)
             .background(.regularMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay {
