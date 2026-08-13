@@ -13,8 +13,14 @@ cask "agent-awake" do
 
   uninstall quit: "io.github.jaewookang.agentawake",
             script: {
-              executable: "#{appdir}/AgentAwake.app/Contents/Resources/agentawake-uninstall-helper.sh",
-              sudo:       true,
+              executable: "/bin/bash",
+              args:       [
+                "-c",
+                'if [[ -x "$1" ]]; then exec /bin/bash "$1"; fi',
+                "agent-awake-uninstall",
+                "#{appdir}/AgentAwake.app/Contents/Resources/agentawake-uninstall-helper.sh",
+              ],
+              sudo: true,
             }
 
   zap trash: [
