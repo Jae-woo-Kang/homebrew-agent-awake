@@ -6,8 +6,10 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot = AgentSnapshot()
     @Published private(set) var keepAwakeEnabled = false
-    @Published private(set) var keepAwakeTransitioning = false
     @Published private(set) var keepAwakeMessage = "꺼짐"
+    @Published private(set) var closedLidEnabled = false
+    @Published private(set) var closedLidTransitioning = false
+    @Published private(set) var closedLidMessage = "꺼짐"
     @Published private(set) var errorMessage: String?
 
     let statusMonitor: AgentStatusMonitor
@@ -36,12 +38,20 @@ final class AppModel: ObservableObject {
             .sink { [weak self] in self?.keepAwakeEnabled = $0 }
             .store(in: &cancellables)
 
-        keepAwakeController.$isTransitioning
-            .sink { [weak self] in self?.keepAwakeTransitioning = $0 }
-            .store(in: &cancellables)
-
         keepAwakeController.$statusMessage
             .sink { [weak self] in self?.keepAwakeMessage = $0 }
+            .store(in: &cancellables)
+
+        keepAwakeController.$isClosedLidEnabled
+            .sink { [weak self] in self?.closedLidEnabled = $0 }
+            .store(in: &cancellables)
+
+        keepAwakeController.$isClosedLidTransitioning
+            .sink { [weak self] in self?.closedLidTransitioning = $0 }
+            .store(in: &cancellables)
+
+        keepAwakeController.$closedLidStatusMessage
+            .sink { [weak self] in self?.closedLidMessage = $0 }
             .store(in: &cancellables)
 
         Publishers.CombineLatest(
@@ -53,12 +63,12 @@ final class AppModel: ObservableObject {
         .store(in: &cancellables)
     }
 
-    var toggleValue: Bool {
-        keepAwakeEnabled || keepAwakeTransitioning
-    }
-
     func setKeepAwake(_ enabled: Bool) {
         keepAwakeController.setEnabled(enabled)
+    }
+
+    func setClosedLid(_ enabled: Bool) {
+        keepAwakeController.setClosedLidEnabled(enabled)
     }
 
     func refresh() {

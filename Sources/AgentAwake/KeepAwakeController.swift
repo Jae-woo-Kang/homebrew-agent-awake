@@ -6,8 +6,10 @@ import IOKit.pwr_mgt
 @MainActor
 final class KeepAwakeController: NSObject, ObservableObject {
     @Published private(set) var isEnabled = false
-    @Published private(set) var isTransitioning = false
     @Published private(set) var statusMessage = "꺼짐"
+    @Published private(set) var isClosedLidEnabled = false
+    @Published private(set) var isClosedLidTransitioning = false
+    @Published private(set) var closedLidStatusMessage = "꺼짐"
     @Published private(set) var lastError: String?
 
     let batteryFloor = 20
@@ -36,6 +38,9 @@ final class KeepAwakeController: NSObject, ObservableObject {
         heartbeatTimer?.invalidate()
     }
 
+    /// The primary toggle only creates a user-level IOKit assertion. It must
+    /// never launch an authorization prompt or another process because doing so
+    /// dismisses a menu bar window on macOS.
     func setEnabled(_ enabled: Bool) {
         if enabled {
             enable()
@@ -45,27 +50,51 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     func enable() {
-        guard !isEnabled, !isTransitioning else { return }
+        guard !isEnabled else { return }
 
         lastError = nil
-        isTransitioning = true
-        statusMessage = "잠자기 방지를 켜는 중…"
-
         do {
             try createPowerAssertion()
+            isEnabled = true
+            statusMessage = "켜짐"
         } catch {
             isEnabled = false
-            isTransitioning = false
             statusMessage = "켜지지 않음"
             lastError = error.localizedDescription
+        }
+    }
+
+    func disable() {
+        guard isEnabled || assertionID != 0 else { return }
+
+        lastError = nil
+        disableClosedLidProtection()
+        releasePowerAssertion()
+        isEnabled = false
+        statusMessage = "꺼짐"
+    }
+
+    /// Closed-lid support is deliberately separate from the primary toggle.
+    /// This optional path requires administrator approval and may temporarily
+    /// dismiss the menu window while the system authorization UI has focus.
+    func setClosedLidEnabled(_ enabled: Bool) {
+        if enabled {
+            enableClosedLidProtection()
+        } else {
+            disableClosedLidProtection()
+        }
+    }
+
+    func enableClosedLidProtection() {
+        guard isEnabled else {
+            lastError = "먼저 Mac 잠자기 방지를 켜세요."
             return
         }
+        guard !isClosedLidEnabled, !isClosedLidTransitioning else { return }
 
-        // The user-level assertion is the primary feature. Keep it active even
-        // if the optional administrator-approved closed-lid guardian cannot
-        // start or the user dismisses its authentication prompt.
-        isEnabled = true
-        statusMessage = "켜짐 · 기본 잠자기 방지"
+        lastError = nil
+        isClosedLidTransitioning = true
+        closedLidStatusMessage = "관리자 승인을 기다리는 중…"
 
         do {
             let lease = try createLeaseDirectory()
@@ -74,21 +103,24 @@ final class KeepAwakeController: NSObject, ObservableObject {
             guardianDidActivate = false
             try launchGuardian(leaseDirectory: lease)
             startHeartbeat()
-            statusMessage = "켜짐 · 덮개 닫힘 승인 대기…"
         } catch {
             finishGuardianSetupFailure(error.localizedDescription)
         }
     }
 
-    func disable() {
-        guard isEnabled || isTransitioning else { return }
+    func disableClosedLidProtection() {
+        guard guardianProcess != nil || isClosedLidEnabled || isClosedLidTransitioning else {
+            isClosedLidEnabled = false
+            isClosedLidTransitioning = false
+            closedLidStatusMessage = "꺼짐"
+            return
+        }
 
         expectedGuardianStop = true
         writeStopSignal()
-        releasePowerAssertion()
-        isEnabled = false
-        isTransitioning = guardianProcess?.isRunning == true
-        statusMessage = isTransitioning ? "안전하게 해제하는 중…" : "꺼짐"
+        isClosedLidEnabled = false
+        isClosedLidTransitioning = guardianProcess?.isRunning == true
+        closedLidStatusMessage = isClosedLidTransitioning ? "안전하게 해제하는 중…" : "꺼짐"
 
         if guardianProcess?.isRunning != true {
             finishGuardianStop(errorMessage: nil)
@@ -96,7 +128,9 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     func shutdown() {
-        disable()
+        disableClosedLidProtection()
+        releasePowerAssertion()
+        isEnabled = false
     }
 
     private func createPowerAssertion() throws {
@@ -199,7 +233,6 @@ final class KeepAwakeController: NSObject, ObservableObject {
             return
         }
 
-        guard isEnabled else { return }
         writeHeartbeat()
 
         guard let leaseDirectory else { return }
@@ -208,8 +241,9 @@ final class KeepAwakeController: NSObject, ObservableObject {
 
         if state.contains("state=active") {
             guardianDidActivate = true
-            isTransitioning = false
-            statusMessage = "켜짐 · 덮개 닫힘 허용"
+            isClosedLidEnabled = true
+            isClosedLidTransitioning = false
+            closedLidStatusMessage = "켜짐"
         }
     }
 
@@ -242,31 +276,21 @@ final class KeepAwakeController: NSObject, ObservableObject {
         heartbeatTimer = nil
         guardianProcess = nil
         guardianErrorPipe = nil
+        isClosedLidEnabled = false
 
         if expectedGuardianStop {
+            closedLidStatusMessage = "꺼짐"
+        } else if guardianWasActive, Self.requiresFullSafetyStop(exitReason) {
             releasePowerAssertion()
             isEnabled = false
-            statusMessage = "꺼짐"
-        } else if guardianWasActive {
-            // A guardian that reached the active state only exits for a safety
-            // condition, so stop both the elevated and user-level protections.
-            releasePowerAssertion()
-            isEnabled = false
-            if let errorMessage {
-                lastError = Self.friendlyGuardianError(errorMessage)
-                statusMessage = "안전장치가 잠자기 방지를 해제함"
-            } else {
-                statusMessage = exitReason ?? "안전장치가 잠자기 방지를 해제함"
-            }
+            statusMessage = exitReason ?? "안전장치가 잠자기 방지를 해제함"
+            closedLidStatusMessage = "안전장치에 의해 꺼짐"
         } else {
-            // Authentication cancellation or guardian setup failure must not
-            // turn off the already-active basic sleep assertion.
-            isEnabled = assertionID != 0
-            statusMessage = "켜짐 · 기본 잠자기 방지"
-            lastError = Self.basicModeFallbackMessage(errorMessage)
+            closedLidStatusMessage = "켜지지 않음"
+            lastError = Self.closedLidFailureMessage(errorMessage)
         }
 
-        isTransitioning = false
+        isClosedLidTransitioning = false
         expectedGuardianStop = false
         guardianDidActivate = false
         cleanLeaseDirectory()
@@ -279,12 +303,10 @@ final class KeepAwakeController: NSObject, ObservableObject {
         guardianErrorPipe = nil
         expectedGuardianStop = false
         guardianDidActivate = false
-        isEnabled = assertionID != 0
-        isTransitioning = false
-        statusMessage = isEnabled ? "켜짐 · 기본 잠자기 방지" : "켜지지 않음"
-        lastError = isEnabled
-            ? Self.basicModeFallbackMessage(message)
-            : message
+        isClosedLidEnabled = false
+        isClosedLidTransitioning = false
+        closedLidStatusMessage = "켜지지 않음"
+        lastError = Self.closedLidFailureMessage(message)
         cleanLeaseDirectory()
     }
 
@@ -325,21 +347,21 @@ final class KeepAwakeController: NSObject, ObservableObject {
         return "\"\(escaped)\""
     }
 
-    private static func friendlyGuardianError(_ message: String) -> String {
-        if message.localizedCaseInsensitiveContains("User canceled")
-            || message.localizedCaseInsensitiveContains("-128") {
-            return "관리자 승인이 취소되어 덮개 닫힘 모드를 켜지 못했습니다."
-        }
-        return message
+    private static func requiresFullSafetyStop(_ reason: String?) -> Bool {
+        guard let reason else { return false }
+        return reason.contains("배터리")
+            || reason.contains("최대 유지 시간")
+            || reason.contains("발열")
+            || reason.contains("앱 응답")
     }
 
-    private static func basicModeFallbackMessage(_ message: String?) -> String {
+    private static func closedLidFailureMessage(_ message: String?) -> String {
         if let message,
            message.localizedCaseInsensitiveContains("User canceled")
             || message.localizedCaseInsensitiveContains("-128") {
             return "관리자 승인이 취소되었습니다. 기본 잠자기 방지는 계속 켜져 있습니다."
         }
-        return "덮개 닫힘 모드는 켜지지 않았지만 기본 잠자기 방지는 계속 켜져 있습니다."
+        return "덮개 닫힘 모드는 켜지지 않았습니다. 기본 잠자기 방지는 계속 켜져 있습니다."
     }
 }
 

@@ -10,17 +10,10 @@ struct AgentAwakeApp: App {
         MenuBarExtra {
             AgentAwakeMenu(model: model)
         } label: {
-            // Keep the status item identity stable while the menu is open.
-            // Replacing this label during an administrator prompt can make the
-            // item disappear on recent macOS versions.
             Image(systemName: "bolt.shield")
-                .accessibilityLabel(menuBarAccessibilityLabel)
+                .accessibilityLabel("AgentAwake")
         }
         .menuBarExtraStyle(.window)
-    }
-
-    private var menuBarAccessibilityLabel: String {
-        model.keepAwakeEnabled ? "AgentAwake 잠자기 방지 켜짐" : "AgentAwake"
     }
 }
 
@@ -38,18 +31,12 @@ private struct AgentAwakeMenu: View {
             VStack(alignment: .leading, spacing: 8) {
                 Toggle(
                     isOn: Binding(
-                        get: { model.toggleValue },
+                        get: { model.keepAwakeEnabled },
                         set: { model.setKeepAwake($0) }
                     )
                 ) {
-                    HStack(spacing: 8) {
-                        Text("Mac 잠자기 방지")
-                            .font(.headline)
-                        if model.keepAwakeTransitioning {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
+                    Text("Mac 잠자기 방지")
+                        .font(.headline)
                 }
                 .toggleStyle(.switch)
 
@@ -57,7 +44,35 @@ private struct AgentAwakeMenu: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("화면은 꺼질 수 있지만 시스템과 네트워크는 계속 작동합니다. 덮개 닫힘 지원은 관리자 승인이 필요합니다.")
+                Text("관리자 승인 없이 즉시 적용됩니다. 화면은 꺼질 수 있지만 시스템과 네트워크는 계속 작동합니다.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Divider()
+
+                Toggle(
+                    isOn: Binding(
+                        get: { model.closedLidEnabled || model.closedLidTransitioning },
+                        set: { model.setClosedLid($0) }
+                    )
+                ) {
+                    HStack(spacing: 8) {
+                        Text("덮개를 닫아도 유지")
+                        if model.closedLidTransitioning {
+                            ProgressView()
+                                .controlSize(.small)
+                        }
+                    }
+                }
+                .toggleStyle(.switch)
+                .disabled(!model.keepAwakeEnabled)
+
+                Label(model.closedLidMessage, systemImage: "laptopcomputer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("선택 기능입니다. 켜면 관리자 승인 창이 열리고 이 메뉴는 잠시 닫힐 수 있습니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
