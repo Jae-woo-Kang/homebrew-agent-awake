@@ -20,7 +20,7 @@ enum AgentAwakeApplication {
 @MainActor
 private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var statusPanel: PersistentStatusPanel?
+    private var statusPopover: NSPopover?
     private var model: AppModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,79 +34,35 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
             button.image = image
             button.toolTip = "AgentAwake"
             button.target = self
-            button.action = #selector(toggleStatusPanel(_:))
+            button.action = #selector(toggleStatusPopover(_:))
         }
         self.statusItem = statusItem
 
         let rootView = AgentAwakeMenu(model: model)
-            .frame(width: 370, height: 500, alignment: .topLeading)
-            .background(.regularMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(Color.primary.opacity(0.18), lineWidth: 1)
-            }
+            .frame(width: 370, height: 390, alignment: .topLeading)
 
         let hostingController = NSHostingController(rootView: rootView)
-        let panel = PersistentStatusPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 370, height: 500),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        panel.contentViewController = hostingController
-        panel.isReleasedWhenClosed = false
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.hidesOnDeactivate = false
-        panel.isFloatingPanel = true
-        panel.becomesKeyOnlyIfNeeded = true
-        panel.level = .floating
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        self.statusPanel = panel
+        let popover = NSPopover()
+        popover.contentViewController = hostingController
+        popover.contentSize = NSSize(width: 370, height: 390)
+        popover.behavior = .transient
+        popover.animates = true
+        self.statusPopover = popover
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         model?.keepAwakeController.shutdown()
     }
 
-    @objc private func toggleStatusPanel(_ sender: NSStatusBarButton) {
-        guard let panel = statusPanel else { return }
+    @objc private func toggleStatusPopover(_ sender: NSStatusBarButton) {
+        guard let popover = statusPopover else { return }
 
-        if panel.isVisible {
-            panel.orderOut(nil)
+        if popover.isShown {
+            popover.performClose(sender)
             return
         }
 
-        position(panel: panel, below: sender)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        panel.makeKeyAndOrderFront(nil)
-    }
-
-    private func position(panel: NSPanel, below button: NSStatusBarButton) {
-        guard let buttonWindow = button.window else { return }
-
-        let buttonFrameInWindow = button.convert(button.bounds, to: nil)
-        let buttonFrame = buttonWindow.convertToScreen(buttonFrameInWindow)
-        let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
-        let panelFrame = panel.frame
-        let idealX = buttonFrame.midX - (panelFrame.width / 2)
-        let minimumX = screenFrame.minX + 8
-        let maximumX = screenFrame.maxX - panelFrame.width - 8
-        let x = min(max(idealX, minimumX), maximumX)
-        let y = buttonFrame.minY - panelFrame.height - 6
-        panel.setFrameOrigin(NSPoint(x: x, y: y))
-    }
-}
-
-private final class PersistentStatusPanel: NSPanel {
-    override var canBecomeKey: Bool {
-        true
-    }
-
-    override var canBecomeMain: Bool {
-        false
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
     }
 }
 
@@ -137,35 +93,7 @@ private struct AgentAwakeMenu: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("관리자 승인 없이 즉시 적용됩니다. 화면은 꺼질 수 있지만 시스템과 네트워크는 계속 작동합니다.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Divider()
-
-                Toggle(
-                    isOn: Binding(
-                        get: { model.closedLidEnabled || model.closedLidTransitioning },
-                        set: { model.setClosedLid($0) }
-                    )
-                ) {
-                    HStack(spacing: 8) {
-                        Text("덮개를 닫아도 유지")
-                        if model.closedLidTransitioning {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                }
-                .toggleStyle(.switch)
-                .disabled(!model.keepAwakeEnabled)
-
-                Label(model.closedLidMessage, systemImage: "laptopcomputer")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("선택 기능입니다. 켜면 관리자 승인 창이 열리지만 AgentAwake 창과 메뉴바 아이콘은 유지됩니다.")
+                Text("자동 시스템 잠자기를 막습니다. 화면은 꺼질 수 있으며, 덮개를 닫거나 직접 잠자기를 선택하면 Mac이 잠듭니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

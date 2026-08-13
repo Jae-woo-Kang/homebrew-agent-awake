@@ -38,13 +38,6 @@ lipo -create \
     "$X86_64_BIN_PATH/AgentAwake" \
     -output "$CONTENTS_DIR/MacOS/AgentAwake"
 
-RESOURCE_BUNDLE="$(find "$ARM64_BIN_PATH" -maxdepth 1 -name 'AgentAwake_*.bundle' -print -quit)"
-if [ -z "$RESOURCE_BUNDLE" ]; then
-    echo "SwiftPM resource bundle was not produced." >&2
-    exit 1
-fi
-cp -R "$RESOURCE_BUNDLE" "$CONTENTS_DIR/Resources/"
-
 cp "$PROJECT_ROOT/packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"
 

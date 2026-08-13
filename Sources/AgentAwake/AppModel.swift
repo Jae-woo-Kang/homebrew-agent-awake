@@ -7,9 +7,6 @@ final class AppModel: ObservableObject {
     @Published private(set) var snapshot = AgentSnapshot()
     @Published private(set) var keepAwakeEnabled = false
     @Published private(set) var keepAwakeMessage = "꺼짐"
-    @Published private(set) var closedLidEnabled = false
-    @Published private(set) var closedLidTransitioning = false
-    @Published private(set) var closedLidMessage = "꺼짐"
     @Published private(set) var errorMessage: String?
 
     let statusMonitor: AgentStatusMonitor
@@ -42,18 +39,6 @@ final class AppModel: ObservableObject {
             .sink { [weak self] in self?.keepAwakeMessage = $0 }
             .store(in: &cancellables)
 
-        keepAwakeController.$isClosedLidEnabled
-            .sink { [weak self] in self?.closedLidEnabled = $0 }
-            .store(in: &cancellables)
-
-        keepAwakeController.$isClosedLidTransitioning
-            .sink { [weak self] in self?.closedLidTransitioning = $0 }
-            .store(in: &cancellables)
-
-        keepAwakeController.$closedLidStatusMessage
-            .sink { [weak self] in self?.closedLidMessage = $0 }
-            .store(in: &cancellables)
-
         Publishers.CombineLatest(
             statusMonitor.$lastError,
             keepAwakeController.$lastError
@@ -65,10 +50,6 @@ final class AppModel: ObservableObject {
 
     func setKeepAwake(_ enabled: Bool) {
         keepAwakeController.setEnabled(enabled)
-    }
-
-    func setClosedLid(_ enabled: Bool) {
-        keepAwakeController.setClosedLidEnabled(enabled)
     }
 
     func refresh() {
