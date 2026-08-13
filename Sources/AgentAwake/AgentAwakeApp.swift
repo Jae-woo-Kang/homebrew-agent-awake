@@ -1,5 +1,6 @@
 import AgentAwakeCore
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -24,6 +25,7 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
     private var localMouseMonitor: Any?
     private var globalMouseMonitor: Any?
     private var model: AppModel?
+    private var cancellables: Set<AnyCancellable> = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let model = AppModel()
@@ -31,14 +33,16 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
 
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem.button {
-            let image = NSImage(systemSymbolName: "bolt.shield", accessibilityDescription: "AgentAwake")
-            image?.isTemplate = true
-            button.image = image
-            button.toolTip = "AgentAwake"
             button.target = self
             button.action = #selector(toggleStatusPanel(_:))
         }
         self.statusItem = statusItem
+
+        Publishers.CombineLatest(model.$keepAwakeEnabled, model.$keepAwakeTransitioning)
+            .sink { [weak self] enabled, transitioning in
+                self?.updateStatusItemIcon(enabled: enabled, transitioning: transitioning)
+            }
+            .store(in: &cancellables)
 
         let rootView = AgentAwakeMenu(model: model)
             .frame(width: 370, height: 430, alignment: .topLeading)
@@ -114,6 +118,28 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
         closePanelIfAllowed()
     }
 
+    private func updateStatusItemIcon(enabled: Bool, transitioning: Bool) {
+        guard let button = statusItem?.button else { return }
+
+        let symbolName: String
+        let description: String
+        if transitioning {
+            symbolName = "ellipsis.circle"
+            description = "AgentAwake 전환 중"
+        } else if enabled {
+            symbolName = "eye.fill"
+            description = "AgentAwake 잠자기 방지 켜짐"
+        } else {
+            symbolName = "eye"
+            description = "AgentAwake 잠자기 방지 꺼짐"
+        }
+
+        let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
+        image?.isTemplate = true
+        button.image = image
+        button.toolTip = description
+    }
+
     private func closePanelIfAllowed() {
         guard model?.keepAwakeTransitioning != true else { return }
         statusPanel?.orderOut(nil)
@@ -175,11 +201,11 @@ private struct AgentAwakeMenu: View {
                 .toggleStyle(.switch)
                 .disabled(model.keepAwakeTransitioning)
 
-                Label(model.keepAwakeMessage, systemImage: "shield.lefthalf.filled")
+                Label(model.keepAwakeMessage, systemImage: "eye.fill")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("켜면 덮개를 닫아도 시스템과 네트워크가 계속 작동합니다. 켤 때 macOS 관리자 승인이 필요합니다.")
+                Text("켜면 덮개를 닫아도 시스템과 네트워크가 계속 작동합니다. 전원 도우미 설치 시 최초 한 번만 관리자 승인이 필요합니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

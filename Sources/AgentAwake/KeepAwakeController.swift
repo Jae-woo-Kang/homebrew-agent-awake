@@ -14,13 +14,18 @@ final class KeepAwakeController: NSObject, ObservableObject {
     let batteryFloor = 20
     let maximumDurationHours = 12
 
+    private let helperVersion = "1"
+    private let helperStatusURL = URL(
+        fileURLWithPath: "/private/var/run/agentawake-helper/status"
+    )
+
     private var assertionID: IOPMAssertionID = 0
-    private var guardianProcess: Process?
-    private var guardianErrorPipe: Pipe?
+    private var installerProcess: Process?
+    private var installerErrorPipe: Pipe?
     private var heartbeatTimer: Timer?
     private var leaseDirectory: URL?
-    private var expectedGuardianStop = false
-    private var guardianDidActivate = false
+    private var activationStartedAt: Date?
+    private var expectedHelperStop = false
 
     override init() {
         super.init()
@@ -46,20 +51,24 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     func enable() {
-        guard !isEnabled, !isTransitioning, guardianProcess == nil else { return }
+        guard !isEnabled, !isTransitioning, installerProcess == nil else { return }
 
         lastError = nil
         isRequestedEnabled = true
         isTransitioning = true
-        statusMessage = "관리자 승인을 기다리는 중…"
+        expectedHelperStop = false
+        activationStartedAt = Date()
 
         do {
             try createPowerAssertion()
-            let lease = try createLeaseDirectory()
-            leaseDirectory = lease
-            expectedGuardianStop = false
-            guardianDidActivate = false
-            try launchGuardian(leaseDirectory: lease)
+            leaseDirectory = try createLeaseDirectory()
+
+            if helperIsReady() {
+                statusMessage = "전원 도우미 연결 중…"
+            } else {
+                statusMessage = "최초 1회 관리자 승인을 기다리는 중…"
+                try launchHelperInstaller()
+            }
             startHeartbeat()
         } catch {
             finishEnableFailure(error.localizedDescription)
@@ -71,20 +80,23 @@ final class KeepAwakeController: NSObject, ObservableObject {
 
         lastError = nil
         isRequestedEnabled = false
-        expectedGuardianStop = true
+        expectedHelperStop = true
         writeStopSignal()
 
-        if guardianProcess?.isRunning == true {
+        if leaseDirectory != nil {
             isTransitioning = true
             statusMessage = "안전하게 해제하는 중…"
         } else {
-            finishGuardianStop(errorMessage: nil)
+            finishHelperStop(errorMessage: nil)
         }
     }
 
     func shutdown() {
-        expectedGuardianStop = true
+        expectedHelperStop = true
         writeStopSignal()
+        installerProcess?.terminate()
+        installerProcess = nil
+        installerErrorPipe = nil
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
         releasePowerAssertion()
@@ -129,27 +141,47 @@ final class KeepAwakeController: NSObject, ObservableObject {
             withIntermediateDirectories: false,
             attributes: [.posixPermissions: 0o700]
         )
+
+        let request = """
+        owner_pid=\(ProcessInfo.processInfo.processIdentifier)
+        owner_uid=\(uid)
+        battery_floor=\(batteryFloor)
+        max_seconds=\(maximumDurationHours * 60 * 60)
+
+        """
+        try Data(request.utf8).write(to: directory.appendingPathComponent("request"))
         try Data("starting\n".utf8).write(to: directory.appendingPathComponent("heartbeat"))
-        try Data().write(to: directory.appendingPathComponent("state"))
+        try Data("state=requested\nreason=waiting\nactivated=0\n".utf8)
+            .write(to: directory.appendingPathComponent("state"))
         return directory
     }
 
-    private func launchGuardian(leaseDirectory: URL) throws {
-        guard let scriptURL = Bundle.main.url(
-            forResource: "agentawake-guardian",
+    private func helperIsReady() -> Bool {
+        guard let status = try? String(contentsOf: helperStatusURL, encoding: .utf8),
+              let values = try? helperStatusURL.resourceValues(
+                  forKeys: [.contentModificationDateKey]
+              ),
+              let modifiedAt = values.contentModificationDate,
+              Date().timeIntervalSince(modifiedAt) < 5 else {
+            return false
+        }
+        let lines = status.split(separator: "\n")
+        return lines.contains { $0 == "version=\(helperVersion)" }
+            && lines.contains { $0 == "allowed_uid=\(getuid())" }
+    }
+
+    private func launchHelperInstaller() throws {
+        guard let installerURL = Bundle.main.url(
+            forResource: "agentawake-install-helper",
             withExtension: "sh"
-        ), FileManager.default.isExecutableFile(atPath: scriptURL.path) else {
-            throw KeepAwakeError.guardianMissing
+        ), FileManager.default.isExecutableFile(atPath: installerURL.path) else {
+            throw KeepAwakeError.helperResourcesMissing
         }
 
         let commandArguments = [
             "/bin/bash",
-            scriptURL.path,
-            leaseDirectory.path,
-            String(ProcessInfo.processInfo.processIdentifier),
+            installerURL.path,
             String(getuid()),
-            String(batteryFloor),
-            String(maximumDurationHours * 60 * 60),
         ]
         let shellCommand = commandArguments.map(Self.shellQuote).joined(separator: " ")
         let appleScript = "do shell script \(Self.appleScriptQuote(shellCommand)) with administrator privileges"
@@ -160,15 +192,15 @@ final class KeepAwakeController: NSObject, ObservableObject {
         process.arguments = ["-e", appleScript]
         process.standardOutput = Pipe()
         process.standardError = errorPipe
-        guardianProcess = process
-        guardianErrorPipe = errorPipe
+        installerProcess = process
+        installerErrorPipe = errorPipe
 
         do {
             try process.run()
         } catch {
-            guardianProcess = nil
-            guardianErrorPipe = nil
-            throw KeepAwakeError.guardianLaunchFailed(error.localizedDescription)
+            installerProcess = nil
+            installerErrorPipe = nil
+            throw KeepAwakeError.helperInstallerLaunchFailed(error.localizedDescription)
         }
     }
 
@@ -185,31 +217,56 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     private func heartbeatTick() {
-        if let guardianProcess, !guardianProcess.isRunning {
-            let data = guardianErrorPipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
+        writeHeartbeat()
+
+        if let installerProcess, !installerProcess.isRunning {
+            let data = installerErrorPipe?.fileHandleForReading.readDataToEndOfFile() ?? Data()
             let rawMessage = String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let message = rawMessage?.isEmpty == false ? rawMessage : nil
-            let failedUnexpectedly = !expectedGuardianStop && guardianProcess.terminationStatus != 0
-            finishGuardianStop(errorMessage: failedUnexpectedly ? message : nil)
-            return
-        }
+            let failed = installerProcess.terminationStatus != 0
+            self.installerProcess = nil
+            installerErrorPipe = nil
 
-        writeHeartbeat()
+            if failed {
+                finishEnableFailure(message ?? "전원 도우미 설치가 취소되었거나 실패했습니다.")
+                return
+            }
+            activationStartedAt = Date()
+            statusMessage = "전원 도우미 연결 중…"
+        }
 
         guard let leaseDirectory else { return }
         let stateURL = leaseDirectory.appendingPathComponent("state")
-        guard let state = try? String(contentsOf: stateURL, encoding: .utf8),
-              state.contains("state=active"),
-              !expectedGuardianStop else {
+        guard let state = try? String(contentsOf: stateURL, encoding: .utf8) else {
+            checkActivationTimeout()
             return
         }
 
-        guardianDidActivate = true
-        isEnabled = true
-        isRequestedEnabled = true
-        isTransitioning = false
-        statusMessage = "켜짐 · 덮개 닫힘 방지 중"
+        switch Self.field("state", in: state) {
+        case "active":
+            guard !expectedHelperStop else { return }
+            isEnabled = true
+            isRequestedEnabled = true
+            isTransitioning = false
+            activationStartedAt = nil
+            statusMessage = "켜짐 · 덮개 닫힘 방지 중"
+        case "stopped":
+            finishHelperStop(errorMessage: Self.field("reason", in: state))
+        case "error":
+            finishHelperStop(errorMessage: Self.field("reason", in: state))
+        default:
+            checkActivationTimeout()
+        }
+    }
+
+    private func checkActivationTimeout() {
+        guard installerProcess == nil,
+              let activationStartedAt,
+              Date().timeIntervalSince(activationStartedAt) > 45 else {
+            return
+        }
+        finishEnableFailure("전원 도우미가 제한 시간 안에 응답하지 않았습니다.")
     }
 
     @objc private func heartbeatTimerFired() {
@@ -233,23 +290,22 @@ final class KeepAwakeController: NSObject, ObservableObject {
         try? Data("stop\n".utf8).write(to: stop, options: .atomic)
     }
 
-    private func finishGuardianStop(errorMessage: String?) {
-        let guardianWasActive = guardianDidActivate || guardianStateShowsActivation()
-        let exitReason = guardianExitReason()
+    private func finishHelperStop(errorMessage: String?) {
+        let wasEnabled = isEnabled || helperStateShowsActivation()
 
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
-        guardianProcess = nil
-        guardianErrorPipe = nil
+        installerProcess = nil
+        installerErrorPipe = nil
         releasePowerAssertion()
         isEnabled = false
         isRequestedEnabled = false
         isTransitioning = false
 
-        if expectedGuardianStop {
+        if expectedHelperStop {
             statusMessage = "꺼짐"
-        } else if guardianWasActive {
-            let reason = exitReason ?? "안전장치가 잠자기 방지를 자동 해제했습니다."
+        } else if wasEnabled {
+            let reason = errorMessage ?? "안전장치가 잠자기 방지를 자동 해제했습니다."
             statusMessage = reason
             lastError = reason
         } else {
@@ -257,44 +313,35 @@ final class KeepAwakeController: NSObject, ObservableObject {
             lastError = Self.activationFailureMessage(errorMessage)
         }
 
-        expectedGuardianStop = false
-        guardianDidActivate = false
+        activationStartedAt = nil
+        expectedHelperStop = false
         cleanLeaseDirectory()
     }
 
     private func finishEnableFailure(_ message: String) {
+        installerProcess?.terminate()
+        installerProcess = nil
+        installerErrorPipe = nil
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
-        guardianProcess = nil
-        guardianErrorPipe = nil
         releasePowerAssertion()
         isEnabled = false
         isRequestedEnabled = false
         isTransitioning = false
         statusMessage = "켜지지 않음"
         lastError = Self.activationFailureMessage(message)
-        expectedGuardianStop = false
-        guardianDidActivate = false
+        activationStartedAt = nil
+        expectedHelperStop = false
         cleanLeaseDirectory()
     }
 
-    private func guardianStateShowsActivation() -> Bool {
+    private func helperStateShowsActivation() -> Bool {
         guard let leaseDirectory else { return false }
         let stateURL = leaseDirectory.appendingPathComponent("state")
         guard let state = try? String(contentsOf: stateURL, encoding: .utf8) else {
             return false
         }
-        return state.contains("activated=1")
-    }
-
-    private func guardianExitReason() -> String? {
-        guard let leaseDirectory else { return nil }
-        let stateURL = leaseDirectory.appendingPathComponent("state")
-        guard let state = try? String(contentsOf: stateURL, encoding: .utf8),
-              let reasonLine = state.split(separator: "\n").first(where: { $0.hasPrefix("reason=") }) else {
-            return nil
-        }
-        return String(reasonLine.dropFirst("reason=".count))
+        return Self.field("activated", in: state) == "1"
     }
 
     private func cleanLeaseDirectory() {
@@ -302,6 +349,14 @@ final class KeepAwakeController: NSObject, ObservableObject {
             try? FileManager.default.removeItem(at: leaseDirectory)
         }
         leaseDirectory = nil
+    }
+
+    private static func field(_ key: String, in contents: String) -> String? {
+        let prefix = "\(key)="
+        guard let line = contents.split(separator: "\n").first(where: { $0.hasPrefix(prefix) }) else {
+            return nil
+        }
+        return String(line.dropFirst(prefix.count))
     }
 
     private static func shellQuote(_ value: String) -> String {
@@ -319,7 +374,7 @@ final class KeepAwakeController: NSObject, ObservableObject {
         if let message,
            message.localizedCaseInsensitiveContains("User canceled")
             || message.localizedCaseInsensitiveContains("-128") {
-            return "관리자 승인이 취소되어 잠자기 방지를 켜지 못했습니다."
+            return "관리자 승인이 취소되어 전원 도우미를 설치하지 못했습니다."
         }
         if let message, !message.isEmpty {
             return "잠자기 방지를 켜지 못했습니다: \(message)"
@@ -330,17 +385,17 @@ final class KeepAwakeController: NSObject, ObservableObject {
 
 private enum KeepAwakeError: LocalizedError {
     case powerAssertionFailed(code: IOReturn)
-    case guardianMissing
-    case guardianLaunchFailed(String)
+    case helperResourcesMissing
+    case helperInstallerLaunchFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .powerAssertionFailed(let code):
             return "macOS 잠자기 방지 요청에 실패했습니다 (오류 \(code))."
-        case .guardianMissing:
-            return "잠자기 방지 안전장치를 앱 번들에서 찾지 못했습니다."
-        case .guardianLaunchFailed(let message):
-            return "잠자기 방지 안전장치를 시작하지 못했습니다: \(message)"
+        case .helperResourcesMissing:
+            return "전원 도우미 설치 파일을 앱 번들에서 찾지 못했습니다."
+        case .helperInstallerLaunchFailed(let message):
+            return "전원 도우미 설치를 시작하지 못했습니다: \(message)"
         }
     }
 }

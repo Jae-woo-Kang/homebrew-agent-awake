@@ -2,7 +2,10 @@
 
 test:
 	swift test
-	bash -n Sources/AgentAwake/Resources/agentawake-guardian.sh
+	bash -n Sources/AgentAwake/Resources/agentawake-helper.sh
+	bash -n Sources/AgentAwake/Resources/agentawake-install-helper.sh
+	bash -n Sources/AgentAwake/Resources/agentawake-uninstall-helper.sh
+	bash -n scripts/test-helper-integration.sh
 	ruby -c Casks/agent-awake.rb
 
 build:
