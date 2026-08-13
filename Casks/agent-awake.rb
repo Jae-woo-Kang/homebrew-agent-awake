@@ -1,6 +1,6 @@
 cask "agent-awake" do
-  version "0.1.2"
-  sha256 "39ce69d1009041bb7aa12ec3d8e1c6f93e21a074edc0a1cae2f746afa95fc7f4"
+  version "0.1.3"
+  sha256 "fa02c8a03cbd7bc6e85bec6d8f59b969a2b5bba3e4675936ee64dabcb02013fd"
 
   url "https://github.com/Jae-woo-Kang/homebrew-agent-awake/releases/download/v#{version}/AgentAwake-#{version}.zip"
   name "AgentAwake"
