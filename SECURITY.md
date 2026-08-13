@@ -1,8 +1,12 @@
 # Security and power-management notes
 
-AgentAwake changes a system-wide macOS power setting only after the user accepts
-the standard administrator prompt. The bundled guardian accepts a fixed set of
-validated arguments and does not execute user-provided commands.
+The primary AgentAwake toggle only creates a user-level IOKit power assertion;
+it does not request administrator access or change a system-wide setting.
+
+AgentAwake changes a system-wide macOS power setting only when the user
+separately enables closed-lid mode and accepts the standard administrator
+prompt. The bundled guardian accepts a fixed set of validated arguments and
+does not execute user-provided commands.
 
 The guardian restores the `SleepDisabled` value that existed before AgentAwake
 was enabled when any of the following happens:
