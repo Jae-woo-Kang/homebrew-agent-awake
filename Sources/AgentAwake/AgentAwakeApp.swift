@@ -3,12 +3,16 @@ import AppKit
 import SwiftUI
 
 @main
-struct AgentAwakeApp: App {
-    @NSApplicationDelegateAdaptor(AgentAwakeAppDelegate.self) private var appDelegate
+enum AgentAwakeApplication {
+    @MainActor
+    static func main() {
+        let application = NSApplication.shared
+        let delegate = AgentAwakeAppDelegate()
+        application.delegate = delegate
+        application.setActivationPolicy(.accessory)
 
-    var body: some Scene {
-        Settings {
-            EmptyView()
+        withExtendedLifetime(delegate) {
+            application.run()
         }
     }
 }
@@ -20,8 +24,6 @@ private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
     private var model: AppModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApplication.shared.setActivationPolicy(.accessory)
-
         let model = AppModel()
         self.model = model
 
