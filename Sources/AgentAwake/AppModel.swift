@@ -6,6 +6,7 @@ import Foundation
 final class AppModel: ObservableObject {
     @Published private(set) var snapshot = AgentSnapshot()
     @Published private(set) var keepAwakeEnabled = false
+    @Published private(set) var keepAwakeTransitioning = false
     @Published private(set) var keepAwakeMessage = "꺼짐"
     @Published private(set) var errorMessage: String?
 
@@ -31,8 +32,12 @@ final class AppModel: ObservableObject {
             .sink { [weak self] in self?.snapshot = $0 }
             .store(in: &cancellables)
 
-        keepAwakeController.$isEnabled
+        keepAwakeController.$isRequestedEnabled
             .sink { [weak self] in self?.keepAwakeEnabled = $0 }
+            .store(in: &cancellables)
+
+        keepAwakeController.$isTransitioning
+            .sink { [weak self] in self?.keepAwakeTransitioning = $0 }
             .store(in: &cancellables)
 
         keepAwakeController.$statusMessage
