@@ -11,7 +11,11 @@ cask "agent-awake" do
 
   app "AgentAwake.app"
 
-  uninstall quit: "io.github.jaewookang.agentawake"
+  uninstall quit: "io.github.jaewookang.agentawake",
+            script: {
+              executable: "#{appdir}/AgentAwake.app/Contents/Resources/agentawake-uninstall-helper.sh",
+              sudo:       true,
+            }
 
   zap trash: [
     "~/Library/Application Support/AgentAwake",
@@ -19,9 +23,9 @@ cask "agent-awake" do
   ]
 
   caveats <<~EOS
-    AgentAwake asks for administrator approval when enabling its keep-awake
-    toggle so it can keep the Mac running with the lid closed. If a previous
-    session was interrupted, restore normal sleep with:
+    AgentAwake asks for administrator approval once to install its restricted
+    power helper. Later keep-awake toggles do not require another password.
+    If a previous session was interrupted, restore normal sleep with:
 
       sudo pmset -a disablesleep 0
 

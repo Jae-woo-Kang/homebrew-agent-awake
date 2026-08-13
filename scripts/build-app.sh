@@ -38,10 +38,17 @@ lipo -create \
     "$X86_64_BIN_PATH/AgentAwake" \
     -output "$CONTENTS_DIR/MacOS/AgentAwake"
 
-install -m 755 \
-    "$PROJECT_ROOT/Sources/AgentAwake/Resources/agentawake-guardian.sh" \
-    "$CONTENTS_DIR/Resources/agentawake-guardian.sh"
-test -x "$CONTENTS_DIR/Resources/agentawake-guardian.sh"
+for script_name in agentawake-helper agentawake-install-helper agentawake-uninstall-helper; do
+    install -m 755 \
+        "$PROJECT_ROOT/Sources/AgentAwake/Resources/${script_name}.sh" \
+        "$CONTENTS_DIR/Resources/${script_name}.sh"
+    test -x "$CONTENTS_DIR/Resources/${script_name}.sh"
+done
+
+install -m 644 \
+    "$PROJECT_ROOT/Sources/AgentAwake/Resources/io.github.jaewookang.agentawake.helper.plist" \
+    "$CONTENTS_DIR/Resources/io.github.jaewookang.agentawake.helper.plist"
+test -r "$CONTENTS_DIR/Resources/io.github.jaewookang.agentawake.helper.plist"
 
 cp "$PROJECT_ROOT/packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$CONTENTS_DIR/Info.plist"

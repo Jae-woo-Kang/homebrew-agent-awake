@@ -15,12 +15,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run Swift tests
         run: swift test
-      - name: Check guardian script
-        run: bash -n Sources/AgentAwake/Resources/agentawake-guardian.sh
+      - name: Check helper resources
+        run: |
+          bash -n Sources/AgentAwake/Resources/agentawake-helper.sh
+          bash -n Sources/AgentAwake/Resources/agentawake-install-helper.sh
+          bash -n Sources/AgentAwake/Resources/agentawake-uninstall-helper.sh
+          plutil -lint Sources/AgentAwake/Resources/io.github.jaewookang.agentawake.helper.plist
       - name: Check Homebrew Cask syntax
         run: ruby -c Casks/agent-awake.rb
       - name: Build universal app bundle
         run: VERSION=0.1.0 scripts/build-app.sh
+      - name: Verify packaged helper resources
+        run: |
+          test -x dist/AgentAwake.app/Contents/Resources/agentawake-helper.sh
+          test -x dist/AgentAwake.app/Contents/Resources/agentawake-install-helper.sh
+          test -x dist/AgentAwake.app/Contents/Resources/agentawake-uninstall-helper.sh
+          test -r dist/AgentAwake.app/Contents/Resources/io.github.jaewookang.agentawake.helper.plist
+      - name: Test one-time helper installation and reuse
+        run: scripts/test-helper-integration.sh
       - name: Upload app bundle
         uses: actions/upload-artifact@v4
         with:
