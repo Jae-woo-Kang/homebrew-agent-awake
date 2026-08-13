@@ -4,16 +4,107 @@ import SwiftUI
 
 @main
 struct AgentAwakeApp: App {
-    @StateObject private var model = AppModel()
+    @NSApplicationDelegateAdaptor(AgentAwakeAppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            AgentAwakeMenu(model: model)
-        } label: {
-            Image(systemName: "bolt.shield")
-                .accessibilityLabel("AgentAwake")
+        Settings {
+            EmptyView()
         }
-        .menuBarExtraStyle(.window)
+    }
+}
+
+@MainActor
+private final class AgentAwakeAppDelegate: NSObject, NSApplicationDelegate {
+    private var statusItem: NSStatusItem?
+    private var statusPanel: PersistentStatusPanel?
+    private var model: AppModel?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApplication.shared.setActivationPolicy(.accessory)
+
+        let model = AppModel()
+        self.model = model
+
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        if let button = statusItem.button {
+            let image = NSImage(systemSymbolName: "bolt.shield", accessibilityDescription: "AgentAwake")
+            image?.isTemplate = true
+            button.image = image
+            button.toolTip = "AgentAwake"
+            button.target = self
+            button.action = #selector(toggleStatusPanel(_:))
+        }
+        self.statusItem = statusItem
+
+        let rootView = AgentAwakeMenu(model: model)
+            .frame(width: 370, minHeight: 500, alignment: .topLeading)
+            .background(.regularMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.primary.opacity(0.18), lineWidth: 1)
+            }
+
+        let hostingController = NSHostingController(rootView: rootView)
+        let panel = PersistentStatusPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 370, height: 500),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        panel.contentViewController = hostingController
+        panel.isReleasedWhenClosed = false
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        self.statusPanel = panel
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model?.keepAwakeController.shutdown()
+    }
+
+    @objc private func toggleStatusPanel(_ sender: NSStatusBarButton) {
+        guard let panel = statusPanel else { return }
+
+        if panel.isVisible {
+            panel.orderOut(nil)
+            return
+        }
+
+        position(panel: panel, below: sender)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    private func position(panel: NSPanel, below button: NSStatusBarButton) {
+        guard let buttonWindow = button.window else { return }
+
+        let buttonFrameInWindow = button.convert(button.bounds, to: nil)
+        let buttonFrame = buttonWindow.convertToScreen(buttonFrameInWindow)
+        let screenFrame = buttonWindow.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
+        let panelFrame = panel.frame
+        let idealX = buttonFrame.midX - (panelFrame.width / 2)
+        let minimumX = screenFrame.minX + 8
+        let maximumX = screenFrame.maxX - panelFrame.width - 8
+        let x = min(max(idealX, minimumX), maximumX)
+        let y = buttonFrame.minY - panelFrame.height - 6
+        panel.setFrameOrigin(NSPoint(x: x, y: y))
+    }
+}
+
+private final class PersistentStatusPanel: NSPanel {
+    override var canBecomeKey: Bool {
+        true
+    }
+
+    override var canBecomeMain: Bool {
+        false
     }
 }
 
@@ -72,7 +163,7 @@ private struct AgentAwakeMenu: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Text("선택 기능입니다. 켜면 관리자 승인 창이 열리고 이 메뉴는 잠시 닫힐 수 있습니다.")
+                Text("선택 기능입니다. 켜면 관리자 승인 창이 열리지만 AgentAwake 창과 메뉴바 아이콘은 유지됩니다.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -99,7 +190,7 @@ private struct AgentAwakeMenu: View {
             .controlSize(.small)
         }
         .padding(16)
-        .frame(width: 350)
+        .frame(width: 370, alignment: .topLeading)
     }
 
     private var header: some View {
