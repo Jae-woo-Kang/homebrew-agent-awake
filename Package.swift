@@ -16,9 +16,6 @@ let package = Package(
         .executableTarget(
             name: "AgentAwake",
             dependencies: ["AgentAwakeCore"],
-            resources: [
-                .copy("Resources/agentawake-guardian.sh"),
-            ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("IOKit"),

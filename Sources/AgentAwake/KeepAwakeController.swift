@@ -135,10 +135,10 @@ final class KeepAwakeController: NSObject, ObservableObject {
     }
 
     private func launchGuardian(leaseDirectory: URL) throws {
-        guard let scriptURL = Bundle.module.url(
+        guard let scriptURL = Bundle.main.url(
             forResource: "agentawake-guardian",
             withExtension: "sh"
-        ) else {
+        ), FileManager.default.isExecutableFile(atPath: scriptURL.path) else {
             throw KeepAwakeError.guardianMissing
         }
 
@@ -320,6 +320,9 @@ final class KeepAwakeController: NSObject, ObservableObject {
            message.localizedCaseInsensitiveContains("User canceled")
             || message.localizedCaseInsensitiveContains("-128") {
             return "관리자 승인이 취소되어 잠자기 방지를 켜지 못했습니다."
+        }
+        if let message, !message.isEmpty {
+            return "잠자기 방지를 켜지 못했습니다: \(message)"
         }
         return "잠자기 방지를 켜지 못했습니다. 다시 시도해 주세요."
     }
