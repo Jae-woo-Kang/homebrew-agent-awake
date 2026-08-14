@@ -57,7 +57,7 @@ AgentAwake는 메뉴바 전용 앱이라 Dock에는 나타나지 않습니다. �
 직접 설치한 AgentAwake에만 사용하세요. 출처를 확인할 수 없는 다른 앱에는
 보안 예외를 적용하지 마세요.
 
-### macOS 보안 경고 해제 (한국어)
+### macOS 보안 경고 해제
 
 1. 현재 표시된 보안 경고 창에서 **완료**를 클릭합니다.
 2. Mac의 **시스템 설정**을 엽니다.
@@ -67,16 +67,6 @@ AgentAwake는 메뉴바 전용 앱이라 Dock에는 나타나지 않습니다. �
    클릭합니다. macOS 버전에 따라 버튼이 **확인 없이 열기**로 표시될 수 있습니다.
 6. Touch ID 또는 Mac 로그인 암호로 승인합니다.
 7. 다시 표시되는 확인 창에서 **열기**를 선택합니다.
-
-### Allow the app through macOS security (English)
-
-1. Click **Done** in the security warning currently displayed.
-2. Open **System Settings** on your Mac.
-3. Select **Privacy & Security**.
-4. Scroll down to the **Security** section.
-5. Next to the message saying AgentAwake was blocked, click **Open Anyway**.
-6. Authenticate with Touch ID or your Mac login password.
-7. Click **Open** in the confirmation dialog that appears.
 
 ## 사용법
 
